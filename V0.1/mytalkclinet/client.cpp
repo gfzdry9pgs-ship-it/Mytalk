@@ -1,0 +1,97 @@
+#include <iostream>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include  <string>
+#include <thread>
+using std::endl;
+using std::thread;
+using std::cout;
+using std::cin;
+using std::string;
+void reveivemessage(SOCKET clientSocket) {
+    string cache;
+    while (1) {
+        char recvbuf[1024];
+        int recvlen=recv(clientSocket,recvbuf,1023,0);
+        if (recvlen>0) {
+            cache.append(recvbuf,recvlen);
+           size_t pos=string::npos;
+           while ((pos=cache.find('\n'))!=string::npos  ) {
+               string message=cache.substr(0,pos);
+               cache.erase(0,pos+1);
+               cout<<"Received message: "<<message<<endl;
+               if (message=="quit") {
+                   return;
+               }
+
+
+             }
+
+
+        }
+
+        else if (recvlen==0) {
+            cout << "Connection closed" << endl;
+            break;
+        }
+        else {
+            cout<<"Received error: "<<WSAGetLastError()<<endl;
+            break;
+        }
+    }
+}
+int main() {
+    WSADATA wsaData;
+   int ret= WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (ret != 0) {
+        cout << "WSAStartup() failed with error: " << ret << endl;
+        return 1;
+    }
+    cout << "WSA version: " << wsaData.wVersion << endl;
+    sockaddr_in server={};
+    server.sin_family=AF_INET;
+    server.sin_port=htons(8888);
+    server.sin_addr.s_addr=inet_addr("127.0.0.1");
+    SOCKET clientSocket=socket(AF_INET,SOCK_STREAM,0);
+    if (clientSocket == INVALID_SOCKET) {
+        cout << "socket() failed with error: " << WSAGetLastError() << endl;
+        WSACleanup();
+        return 1;
+
+    }
+    cout << "Socket created" << endl;
+    ret = connect(clientSocket,(struct sockaddr*)&server,sizeof(server));
+    if (ret == SOCKET_ERROR) {
+        cout << "connect() failed with error: " << WSAGetLastError() << endl;
+        closesocket(clientSocket);
+        WSACleanup();
+        return 1;
+
+    }
+    cout << "Connection established" << endl;
+    thread recvThread(reveivemessage,clientSocket);
+    while (true) {
+        string reply;
+        getline(cin,reply);
+
+        while (reply.empty()) {
+            getline(cin,reply);
+        }
+        reply+='\n';
+        if (reply == "quit\n") {
+            send(clientSocket,reply.c_str(),reply.length(),0);
+            break;
+        }
+
+        int sendlen = send(clientSocket,reply.c_str(),reply.length(),0);
+        if (sendlen < 0) {
+            cout << "send() failed with error: " << WSAGetLastError() << endl;
+            break;
+        }
+    }
+    shutdown(clientSocket,SD_BOTH);
+    recvThread.join();
+    closesocket(clientSocket);
+    WSACleanup();
+    return 0;
+}

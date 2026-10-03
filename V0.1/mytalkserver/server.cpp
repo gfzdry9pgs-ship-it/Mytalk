@@ -4,13 +4,17 @@
 #include <unistd.h>
 #include <string>
 #include <thread>
+#include <vector>
 using std::thread;
 using std::string;
 using std::cout;
 using std::cin;
 using std::endl;
+using std::vector;
+vector<int> clients;
+void broadcast(string& message,int sendersocket);
 //this is server.
-void receivemessage(int clientSocket) {
+void handleclient(int clientSocket) {
     string cache;
     while (1) {
         char buffer[1024];
@@ -22,7 +26,8 @@ void receivemessage(int clientSocket) {
             while ((pos=cache.find('\n'))!=string::npos) {
                 string message=cache.substr(0,pos);
                 cache.erase(0,pos+1);
-                cout<<"Received:"<<message<<endl;
+                cout<<"Received:"<<std::to_string(clientSocket)<<": "<<message<<endl;
+                broadcast(message,clientSocket);
             }
         }
         if (len==0) {
@@ -34,6 +39,18 @@ void receivemessage(int clientSocket) {
             break;
         }
     }
+}
+void broadcast(string& message,int sendersocket) {
+    string sendmessage=std::to_string(sendersocket);
+    sendmessage+=": ";
+    sendmessage+=message;
+    sendmessage+='\n';
+    for (int clinent: clients) {
+        if (clinent != sendersocket) {
+            send(clinent,sendmessage.c_str(),sendmessage.length(),0);
+        }
+    }
+
 }
 int main() {
     int serverSocket = socket(AF_INET,SOCK_STREAM,0);
@@ -57,33 +74,21 @@ int main() {
         return 1;
     }
     cout << "Listen success" << endl;
-    int clientSocket = accept(serverSocket,NULL,NULL);
-    if (clientSocket == -1) {
-        cout << "Accept error" << endl;
-        return 1;
-    }
-    cout << "Accept success" << endl;
-    thread recvThread(receivemessage,clientSocket);
     while (true) {
-        std:: string reply;
-        getline(cin,reply);
-        while (reply.empty())
-        {
-            getline(cin,reply);
+        int clientSocket = accept(serverSocket,NULL,NULL);
+        if (clientSocket == -1) {
+            cout << "Accept error" << endl;
+            continue;
         }
-        reply+='\n';
-        if (reply=="quit\n") {
-            send(clientSocket,reply.c_str(),reply.length(),0);
-            break;
-        }
-        ssize_t sendlen= send(clientSocket,reply.c_str(),reply.length(),0);
-        if (sendlen==-1) {
-            cout << "Send error" << endl;
-        }
+        cout << "Accept success" << endl;
+        clients.push_back(clientSocket);
+        thread handleclinentThread(handleclient,clientSocket);
+        handleclinentThread.detach();
     }
-    shutdown(clientSocket,SHUT_RDWR);
-    recvThread.join();
-    close(clientSocket);
+
+
+
+
     close(serverSocket);
     return 0;
 

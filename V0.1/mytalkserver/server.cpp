@@ -6,6 +6,8 @@
 #include <thread>
 #include <vector>
 #include <algorithm>
+#include <mutex>
+std::mutex clients_mutex;
 using std::thread;
 using std::string;
 using std::cout;
@@ -19,6 +21,7 @@ struct struct_client {
         return this->client_socket==other_client.client_socket;
     }
     bool registered=false;
+    bool authenticated=false;
 };
 vector<struct_client> clients;
 void broadcast(string& message,int sendersocket);
@@ -26,101 +29,95 @@ void broadcast(string& message,int sendersocket);
 void handleclient(struct_client clientSocket) {
     string cache;
     while (1) {
-        if (clientSocket.registered==true) {
-            break;
-        }
         char buffer[1024];
         ssize_t len=recv(clientSocket.client_socket,buffer,1023,0);
         if (len>0) {
             cache.append(buffer,len);
             size_t pos;
             while ((pos=cache.find('\n'))!=string::npos) {
-                if (clientSocket.registered==true) {
-                    break;
-                }
                 string message=cache.substr(0,pos);
                 cache.erase(0,pos+1);
-                if (message.rfind("NAME|",0)==0) {
-
-                    clientSocket.client_name=message.substr(5);
-                    if (!clientSocket.client_name.empty()) {
-                        clientSocket.registered=true;
+                size_t linepos=string::npos;
+                linepos=message.find('|');
+                if (linepos==string::npos) {//解析失败，理论上不会出现没找到|的情况
+                    continue;
+                }
+                string command=message.substr(0,linepos);
+                string data=message.substr(linepos+1);
+                if (command=="AUTH") {
+                    if (data!="111111") {
+                        close(clientSocket.client_socket);
+                        return ;
+                    }
+                    clientSocket.authenticated=true;
+                }
+                if (command=="NAME") {
+                    if (!clientSocket.authenticated) {
+                        continue;
+                    }
+                    if (clientSocket.registered) {
+                        continue;
+                    }
+                    if (data.empty()) {
+                        continue;
+                    }
+                    clientSocket.client_name=data;
+                    clientSocket.registered=true;
+                    {
+                        std::lock_guard<std::mutex> lock(clients_mutex);
                         clients.push_back(clientSocket);
                     }
+
                 }
-
-            }
-        }
-        if (len==0) {
-            cout << "Connection closed" << endl;
-            close(clientSocket.client_socket);
-            return;
-
-        }
-        if (len<0) {
-            cout << "Receive error" << endl;
-            close(clientSocket.client_socket);
-            return;
-        }
-
-    }
-    while (1) {
-        size_t pos=string::npos;
-        while ((pos=cache.find('\n'))!=string::npos) {
-            string message=cache.substr(0,pos);
-            cache.erase(0,pos+1);
-            if (message.rfind("CHAT|",0)==0) {
-                message=message.substr(5);//删除chat前缀
-                message=clientSocket.client_name+": "+message;
-                cout<<"Received "<<message<<endl;
-                broadcast(message,clientSocket.client_socket);
-            }
-        }
-        //以上是处理上一次残留的消息的内容
-        char buffer[1024];
-        ssize_t len=recv(clientSocket.client_socket,buffer,1023,0);
-
-        if (len>0) {
-            cache.append(buffer,len);
-             pos=string::npos;
-            while ((pos=cache.find('\n'))!=string::npos) {
-                string message=cache.substr(0,pos);
-                cache.erase(0,pos+1);
-                if (message.rfind("CHAT|",0)==0) {
-                    message=message.substr(5);//删除chat前缀
-                    message=clientSocket.client_name+": "+message;
-                    cout<<"Received "<<message<<endl;
-                    broadcast(message,clientSocket.client_socket);
+                if (command=="CHAT") {
+                    if (!clientSocket.registered) {
+                        continue;
+                    }
+                    string chatmessage=clientSocket.client_name+": "+data;
+                    broadcast(chatmessage,clientSocket.client_socket);
                 }
             }
         }
         if (len==0) {
             cout << "Connection closed" << endl;
             struct_client tmpclient={clientSocket.client_socket,"tmpstr"};
-            auto erasepos=std::find(clients.begin(),clients.end(),tmpclient);
-            clients.erase(erasepos);
+            {   std::lock_guard<std::mutex> lock(clients_mutex);
+                auto erasepos=std::find(clients.begin(),clients.end(),tmpclient);
+                if (erasepos!=clients.end()) {
+                    clients.erase(erasepos);
+                }
+            }
             break;
         }
         if (len<0) {
             cout << "Receive error" << endl;
             struct_client tmpclient={clientSocket.client_socket,"tmpstr"};
-            auto erasepos=std::find(clients.begin(),clients.end(),tmpclient);
-            clients.erase(erasepos);
+            {   std::lock_guard<std::mutex> lock(clients_mutex);
+                auto erasepos=std::find(clients.begin(),clients.end(),tmpclient);
+                if (erasepos!=clients.end()) {
+                    clients.erase(erasepos);
+                }
+            }
             break;
         }
+
     }
     close(clientSocket.client_socket);
     
 }
 void broadcast(string& message,int sendersocket) {
+    vector<struct_client> temp;
+    string  sendmessage=message+'\n';
+    {
+       std::lock_guard<std::mutex> lock(clients_mutex);
+        temp=clients;
+    }
 
-   string  sendmessage=message+'\n';
-
-    for (auto client: clients) {
+    for (auto client: temp) {
         if (client.client_socket != sendersocket) {
             send(client.client_socket,sendmessage.c_str(),sendmessage.length(),0);
         }
-    }
+        }
 
 }
 int main() {

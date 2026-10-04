@@ -23,13 +23,10 @@ void reveivemessage(SOCKET clientSocket) {
                if (message=="quit") {
                    return;
                }
-
-
              }
 
 
         }
-
         else if (recvlen==0) {
             cout << "Connection closed" << endl;
             break;
@@ -41,6 +38,12 @@ void reveivemessage(SOCKET clientSocket) {
     }
 }
 int main() {
+    cout<<"Enter Password：";
+    string password;
+    cin>>password;
+    if (password!="111111") {
+        return 1;
+    }
     WSADATA wsaData;
    int ret= WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (ret != 0) {
@@ -69,6 +72,17 @@ int main() {
 
     }
     cout << "Connection established" << endl;
+    cout<<"Please Enter Your Name: ";
+    string name;
+    cin>>name;
+    name="NAME|"+name+'\n';
+    int sendlen=send(clientSocket,name.c_str(),name.length(),0);
+    if (sendlen < 0) {
+        cout << "send() failed with error: " << WSAGetLastError() << endl;
+        WSACleanup();
+        return 1;
+
+    }
     thread recvThread(reveivemessage,clientSocket);
     while (true) {
         string reply;
@@ -77,12 +91,11 @@ int main() {
         while (reply.empty()) {
             getline(cin,reply);
         }
-        reply+='\n';
-        if (reply == "quit\n") {
+        reply="CHAT|"+reply+'\n';
+        if (reply == "CHAT|quit\n") {
             send(clientSocket,reply.c_str(),reply.length(),0);
             break;
         }
-
         int sendlen = send(clientSocket,reply.c_str(),reply.length(),0);
         if (sendlen < 0) {
             cout << "send() failed with error: " << WSAGetLastError() << endl;

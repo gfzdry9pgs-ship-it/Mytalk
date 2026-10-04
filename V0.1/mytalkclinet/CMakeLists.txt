@@ -8,3 +8,4 @@ set(CMAKE_CXX_STANDARD 20)
 add_executable(mytalkclient client.cpp)
 
 target_link_libraries(mytalkclient ws2_32)
+target_link_options(mytalkclient PRIVATE -static-libgcc -static-libstdc++)

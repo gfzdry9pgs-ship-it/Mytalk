@@ -38,7 +38,7 @@ void reveivemessage(SOCKET clientSocket) {
     }
 }
 int main() {
-    cout<<"Enter Password：";
+    cout<<"Enter Password: ";
     string password;
     cin>>password;
     WSADATA wsaData;

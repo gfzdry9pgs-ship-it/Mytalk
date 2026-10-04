@@ -74,6 +74,7 @@ void handleclient(struct_client clientSocket) {
                         continue;
                     }
                     string chatmessage=clientSocket.client_name+": "+data;
+                    cout<<chatmessage<<endl;
                     broadcast(chatmessage,clientSocket.client_socket);
                 }
             }

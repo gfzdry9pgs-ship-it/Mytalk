@@ -23,8 +23,10 @@ struct struct_client {
     bool registered=false;
     bool authenticated=false;
 };
+//scp C:\Users\Lenovo\Desktop\Mytalk\V0.1\mytalkserver\server.cpp ubuntu@122.51.213.119:~/mytalk/server.cpp
 vector<struct_client> clients;
-void broadcast(string& message,int sendersocket);
+void broadcast(string message,int sendersocket);
+void privatemessagefunction(string message,string privatename,struct_client sendersocket,int& ret);
 //this is server.
 void handleclient(struct_client clientSocket) {
     string cache;
@@ -45,11 +47,17 @@ void handleclient(struct_client clientSocket) {
                 string command=message.substr(0,linepos);
                 string data=message.substr(linepos+1);
                 if (command=="AUTH") {
+                    if (clientSocket.authenticated) {
+                        continue;
+                    }
                     if (data!="111111") {
+                        string autherrormsg="密码错误\n";
+                        send(clientSocket.client_socket,autherrormsg.c_str(),autherrormsg.length(),0);
                         close(clientSocket.client_socket);
                         return ;
                     }
                     clientSocket.authenticated=true;
+
                 }
                 if (command=="NAME") {
                     if (!clientSocket.authenticated) {
@@ -61,13 +69,32 @@ void handleclient(struct_client clientSocket) {
                     if (data.empty()) {
                         continue;
                     }
-                    clientSocket.client_name=data;
-                    clientSocket.registered=true;
+                    bool duplicate=false;
                     {
-                        std::lock_guard<std::mutex> lock(clients_mutex);
-                        clients.push_back(clientSocket);
+                        std:: lock_guard<std::mutex> lock(clients_mutex);
+                        for (auto client: clients) {
+                            if (client.client_name==data) {
+                                duplicate=true;
+                                break;
+                            }
+                        }
+                        if (!duplicate) {
+                            clientSocket.client_name=data;
+                            clientSocket.registered=true;
+                            clients.push_back(clientSocket);
+                        }
                     }
-
+                        if (!duplicate){
+                            string duplicatemsg="OK|Sucessfully\n";
+                            send(clientSocket.client_socket,duplicatemsg.c_str(),duplicatemsg.length(),0);
+                            broadcast(clientSocket.client_name+" Login",clientSocket.client_socket);
+                            }
+                        if (duplicate) {
+                            string duplicatemsg="已被命名，重新连接并重新命名\n";
+                            send(clientSocket.client_socket,duplicatemsg.c_str(),duplicatemsg.length(),0);
+                            close(clientSocket.client_socket);
+                            return;
+                        }
                 }
                 if (command=="CHAT") {
                     if (!clientSocket.registered) {
@@ -77,10 +104,52 @@ void handleclient(struct_client clientSocket) {
                     cout<<chatmessage<<endl;
                     broadcast(chatmessage,clientSocket.client_socket);
                 }
+                if (command=="MSG") {
+                    if (!clientSocket.registered) {
+                        continue;
+                    }
+                   size_t namepos=data.find('|');
+                    if (namepos==string::npos) {//解析失败，理论上不会出现没找到|的情况
+                        continue;
+                    }
+                    string privatemsgname=data.substr(0,namepos);
+                    string privatemessage=data.substr(namepos+1);
+                    int ret=0;
+                    privatemessagefunction(privatemessage,privatemsgname,clientSocket,ret);
+                    string msgsuccedmsg;
+                    if (ret==0) {
+                        msgsuccedmsg="ERROR|NOT FOUND\n";
+                    }
+                    if (ret==1) {
+                        msgsuccedmsg="OK|MSGED\n";
+                    }
+                    send(clientSocket.client_socket,msgsuccedmsg.c_str(),msgsuccedmsg.length(),0);
+                }
+                if (command=="LIST") {
+                    if (!clientSocket.registered) {
+                        continue;
+                    }
+                    vector<struct_client> temp;
+                    {
+                        std::lock_guard<std::mutex> lock(clients_mutex);
+                        temp=clients;
+                    }
+                    string listmessage="[OS] USERS:";
+                    for (auto client: temp) {
+                       listmessage+=client.client_name+"|";
+                    }
+                    listmessage+='\n';
+                    send(clientSocket.client_socket,listmessage.c_str(),listmessage.length(),0);
+                }
             }
         }
-        if (len==0) {
-            cout << "Connection closed" << endl;
+        if (len<=0) {
+            if (len==0) {
+                cout << "Connection closed" << endl;
+            }
+            else {
+                cout<<"Receive Error"<<endl;
+            }
             struct_client tmpclient={clientSocket.client_socket,"tmpstr"};
             {   std::lock_guard<std::mutex> lock(clients_mutex);
                 auto erasepos=std::find(clients.begin(),clients.end(),tmpclient);
@@ -88,25 +157,16 @@ void handleclient(struct_client clientSocket) {
                     clients.erase(erasepos);
                 }
             }
+            if (clientSocket.registered)broadcast(clientSocket.client_name+" left",clientSocket.client_socket);
             break;
         }
-        if (len<0) {
-            cout << "Receive error" << endl;
-            struct_client tmpclient={clientSocket.client_socket,"tmpstr"};
-            {   std::lock_guard<std::mutex> lock(clients_mutex);
-                auto erasepos=std::find(clients.begin(),clients.end(),tmpclient);
-                if (erasepos!=clients.end()) {
-                    clients.erase(erasepos);
-                }
-            }
-            break;
-        }
+
 
     }
     close(clientSocket.client_socket);
     
 }
-void broadcast(string& message,int sendersocket) {
+void broadcast(string message,int sendersocket) {
     vector<struct_client> temp;
     string  sendmessage=message+'\n';
     {
@@ -116,10 +176,27 @@ void broadcast(string& message,int sendersocket) {
 
     for (auto client: temp) {
         if (client.client_socket != sendersocket) {
+
             send(client.client_socket,sendmessage.c_str(),sendmessage.length(),0);
         }
         }
 
+}
+void privatemessagefunction(string message,string privatename,struct_client sendersocket,int& ret) {
+    ret=0;
+    vector<struct_client> temp;
+    string  sendmessage="[私聊]"+sendersocket.client_name+':'+message+'\n';
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        temp=clients;
+    }
+
+    for (auto client: temp) {
+        if (client.client_name==privatename) {
+            ret=1;
+            send(client.client_socket,sendmessage.c_str(),sendmessage.length(),0);
+        }
+    }
 }
 int main() {
     int serverSocket = socket(AF_INET,SOCK_STREAM,0);
@@ -152,7 +229,7 @@ int main() {
         cout << "Accept success" << endl;
      //   clients.push_back(clientSocket);
         struct_client processingclient={clientSocket,"processingstr",false};
-        thread handleclinentThread(handleclient,processingclient);//?传入引用怎么错误
+        thread handleclinentThread(handleclient,processingclient);
         handleclinentThread.detach();
     }
     close(serverSocket);

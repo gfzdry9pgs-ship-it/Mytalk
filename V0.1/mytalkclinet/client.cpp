@@ -3,8 +3,10 @@
 #include <ws2tcpip.h>
 #include  <string>
 #include <thread>
+#include <sstream>
 using std::endl;
 using std::thread;
+using std::stringstream;
 using std::cout;
 using std::cin;
 using std::string;
@@ -20,9 +22,7 @@ void reveivemessage(SOCKET clientSocket) {
                string message=cache.substr(0,pos);
                cache.erase(0,pos+1);
                cout<<"Received message: "<<message<<endl;
-               if (message=="quit") {
-                   return;
-               }
+
              }
 
 
@@ -91,19 +91,43 @@ int main() {
     thread recvThread(reveivemessage,clientSocket);
     while (true) {
         string reply;
-        getline(cin,reply);
 
-        while (reply.empty()) {
-            getline(cin,reply);
-        }
-        reply="CHAT|"+reply+'\n';
-        if (reply == "CHAT|quit\n") {
-            send(clientSocket,reply.c_str(),reply.length(),0);
+        if (!getline(cin,reply)) {
             break;
+        }
+        if (reply.empty()) {
+            continue;
+        }
+        stringstream replyStream(reply);
+        string command;
+        replyStream >> command;
+        if (command == "/msg") {
+            string msgname;
+            replyStream >> msgname;
+            string message;
+            getline(replyStream>>std::ws,message);
+            if (msgname.empty()||message.empty()) {
+                continue;
+            }
+            reply="MSG|"+msgname+'|'+message+'\n';
+        }
+        else if (command=="/list") {
+                reply="LIST|\n";
+                }
+            else {
+                reply="CHAT|"+reply+'\n';
+            }
+
+        bool quitting=false;
+        if (reply == "CHAT|quit\n") {
+          quitting=true;
         }
         int sendlen = send(clientSocket,reply.c_str(),reply.length(),0);
         if (sendlen < 0) {
             cout << "send() failed with error: " << WSAGetLastError() << endl;
+            break;
+        }
+        if (quitting) {
             break;
         }
     }

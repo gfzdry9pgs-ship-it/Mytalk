@@ -10,6 +10,17 @@ using std::stringstream;
 using std::cout;
 using std::cin;
 using std::string;
+bool sendAll(int fd,string message,int length) {
+    size_t sent = 0;
+    while (sent<message.length()) {
+        size_t result=send(fd,message.c_str() + sent,message.length() - sent,0);
+        if (result < 0) {
+            return false;
+        }
+        sent+=result;
+    }
+    return true;
+}
 void reveivemessage(SOCKET clientSocket) {
     string cache;
     while (1) {
